@@ -1,0 +1,364 @@
+---
+title: "FMPH227 project"
+author: "Daniel Zoleikhaeian, Keren Hu"
+date: "2023-12-02"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r}
+library(MASS)
+library(class)
+library(glmnet)
+library(compareGroups)
+library(methods)
+library(tree)
+library(randomForest)
+library(leaps)
+library(Rfast)
+library(ggplot2)
+setwd("D:/Users/Karen/Desktop/FMPH227/Project")
+heart <- read.csv("heart_failure_clinical_records_dataset.csv")
+heart$DEATH_EVENT <- as.factor(heart$DEATH_EVENT)
+xnams <- c("age", "anaemia", "creatinine_phosphokinase", "diabetes",
+           "ejection_fraction", "high_blood_pressure", "platelets",
+           "serum_creatinine", "serum_sodium", "sex", "smoking")
+fmla <- as.formula(paste("DEATH_EVENT ~ ", paste(xnams, collapse= "+")))
+heart <- heart[, -12]
+```
+
+```{r}
+# PCA to collapse the predictor variables into 2 dimensions
+labels <- heart$DEATH_EVENT
+pr.out=prcomp(heart[,xnams], scale=TRUE)
+
+# Plotting the Results  
+df_pc12 <- data.frame(PC1 = pr.out$x[,1],
+                      PC2 = pr.out$x[,2],
+                      Death_indicator = heart$DEATH_EVENT)
+  
+p <- ggplot(df_pc12,aes(x=PC1,y=PC2,col=Death_indicator)) + geom_point() + ggtitle('Death among Patients with Heart Failure')
+p
+
+names(pr.out)
+
+pr.var <- pr.out$sdev^2
+pve <-pr.var/sum(pr.var)
+
+sum(pve[1:2])
+```
+
+
+
+```{r}
+# Demographic description
+tab1 <- compareGroups( DEATH_EVENT~ ., data = heart)
+restab <- createTable(tab1)
+export2md(restab, caption = "Demographic characteristics of study participants")
+```
+
+
+
+
+```{r}
+# logistic
+logis.fit <- glm(fmla,data = heart, family=binomial)
+summary(logis.fit)
+logis.fit.step <- step(logis.fit, direction = "backward", trace = 0)
+logis.pred <- predict(logis.fit.step, type = "response")
+
+
+# logis.fit.sub <- regsubsets(fmla, data = heart, nvmax = 14)
+# summary(logis.fit.sub)
+#  cbind( Cp  = summary(logis.fit.sub)$cp,
+#         r2 = summary(logis.fit.sub)$rsq,
+#     Adj_r2 = summary(logis.fit.sub)$adjr2,
+#     BIC    =summary(logis.fit.sub)$bic
+# )
+
+tbl <- table(heart$DEATH_EVENT,logis.pred>0.5)
+crrcls <- (tbl[1,1] + tbl[2,2])/sum(tbl)
+sens <- tbl[2,2]/(tbl[2,1] + tbl[2,2]) 
+spec <- tbl[1,1]/(tbl[1,1] + tbl[1,2]) 
+ppv <- tbl[2,2]/(tbl[1,2] + tbl[2,2]) 
+npv <- tbl[1,1]/(tbl[1,1] + tbl[2,1]) 
+
+Accuracy.logis <- c(crrcls,sens,spec,ppv,npv)
+dd <- data.frame(Accuracy.logis, 
+                 row.names = c("Correct Classification", 
+                               "Sensitivity", "Specificity", 
+                               "Positive Predictive Value", 
+                               "Negative Predictive value"))
+
+# # LDA
+# lda.fit <- lda(fmla,data = heart)
+# lda.pred <- predict(lda.fit,heart)
+# tbl <- table(heart$DEATH_EVENT, lda.pred$posterior[,2]>0.5)
+# 
+# crrcls <- (tbl[1,1] + tbl[2,2])/sum(tbl)
+# sens <- tbl[2,2]/(tbl[2,1] + tbl[2,2]) 
+# spec <- tbl[1,1]/(tbl[1,1] + tbl[1,2]) 
+# ppv <- tbl[2,2]/(tbl[1,2] + tbl[2,2]) 
+# npv <- tbl[1,1]/(tbl[1,1] + tbl[2,1]) 
+# dd$Accuracy.lda <- c(crrcls,sens,spec,ppv,npv)
+# 
+# 
+# # QDA
+# qda.fit <- qda(fmla,data = heart)
+# qda.pred <- predict(qda.fit,heart)
+# tbl <- table(heart$DEATH_EVENT, qda.pred$posterior[,2]>0.5)
+# 
+# crrcls <- (tbl[1,1] + tbl[2,2])/sum(tbl)
+# sens <- tbl[2,2]/(tbl[2,1] + tbl[2,2]) 
+# spec <- tbl[1,1]/(tbl[1,1] + tbl[1,2]) 
+# ppv <- tbl[2,2]/(tbl[1,2] + tbl[2,2]) 
+# npv <- tbl[1,1]/(tbl[1,1] + tbl[2,1]) 
+# 
+# dd$Accuracy.qda <- c(crrcls,sens,spec,ppv,npv)
+
+##k-NN
+##k=6
+
+xxx <- as.matrix(heart[,xnams])
+yyy <- heart$DEATH_EVENT
+
+knn.res <- knn.cv(x=xxx, y=yyy, nfolds = 10, stratified = FALSE, k=1:10, type = "C")
+plot(1:10, knn.res$crit, type = "b", xlab = "k", ylab = "Accuracy" )
+grid()
+# k=6 is best
+knn.pred <- class::knn(heart[,xnams], heart[,xnams],heart$DEATH_EVENT, k=which.max(knn.res$crit))
+
+tbl <- table(knn.pred, heart$DEATH_EVENT)
+crrcls <- (tbl[1,1] + tbl[2,2])/sum(tbl)
+sens <- tbl[2,2]/(tbl[2,1] + tbl[2,2]) 
+spec <- tbl[1,1]/(tbl[1,1] + tbl[1,2]) 
+ppv <- tbl[2,2]/(tbl[1,2] + tbl[2,2]) 
+npv <- tbl[1,1]/(tbl[1,1] + tbl[2,1]) 
+dd$Accuracy.knn <- c(crrcls,sens,spec,ppv,npv)
+
+round(dd,3)
+```
+
+```{r}
+#RIDGE and LASSO fit
+# some variable are not significant, and we want to
+xxx <- as.matrix(heart[,xnams])
+yyy <- heart$DEATH_EVENT
+
+set.seed(2446)
+gridd <- exp(seq(2,-6,-0.5))  ##lambda values
+
+##ridge fit
+rdg.fit <- glmnet(xxx,yyy,family="binomial",alpha=0,lambda=gridd)
+
+##cross-validation to select lambda
+cv.rdgeg <- cv.glmnet(xxx,yyy,family="binomial",alpha=0,
+                      lambda=gridd,nfolds=10,
+                      type.measure="class")
+
+
+##lasso fit
+lso.fit <- glmnet(xxx,yyy,family="binomial",alpha=1,lambda=gridd)
+
+##cross-validation to select lambda
+cv.lsoeg <- cv.glmnet(xxx,yyy,family="binomial",alpha=1,
+                      lambda=gridd,nfolds=10,
+                      type.measure="class")
+
+par(mfrow=c(1,2))
+plot(cv.rdgeg, main= "Ridge")
+plot(cv.lsoeg, main="Lasso")
+
+################### OPTIMAL LAMBDA
+####Variables (and coefficients) at optimal $\lambda$s for RIDGE
+c(cv.rdgeg$lambda.min,cv.rdgeg$lambda.1se)
+log(c(cv.rdgeg$lambda.min,cv.rdgeg$lambda.1se))
+
+##Coeff at "best" lambda
+coef(cv.rdgeg,s="lambda.min")
+
+##Coeff at  lambda + 1SE
+coef(cv.rdgeg,s="lambda.1se")
+
+###Variables (and coefficients) at optimal $\lambda$s for LASSO:
+##Coeff at "best" lambda
+c(cv.lsoeg$lambda.min,cv.lsoeg$lambda.1se)
+log(c(cv.lsoeg$lambda.min,cv.lsoeg$lambda.1se))
+
+coef(cv.lsoeg,s="lambda.min")
+
+##Coeff at  lambda + 1SE
+coef(cv.lsoeg,s="lambda.1se")
+
+# predict from ridge and lasso
+
+ridge.pred <- predict(cv.rdgeg, s=cv.rdgeg$lambda.min, newx = xxx,
+                      type = "response")
+tbl <- table(heart$DEATH_EVENT,ridge.pred>0.5)
+crrcls <- (tbl[1,1] + tbl[2,2])/sum(tbl)
+sens <- tbl[2,2]/(tbl[2,1] + tbl[2,2]) 
+spec <- tbl[1,1]/(tbl[1,1] + tbl[1,2]) 
+ppv <- tbl[2,2]/(tbl[1,2] + tbl[2,2]) 
+npv <- tbl[1,1]/(tbl[1,1] + tbl[2,1]) 
+dd$Accuracy.ridge <- c(crrcls,sens,spec,ppv,npv)
+
+lasso.pred <- predict(cv.lsoeg, s=cv.lsoeg$lambda.min, newx = xxx,
+                      type = "response")
+tbl <- table(heart$DEATH_EVENT,lasso.pred>0.5)
+crrcls <- (tbl[1,1] + tbl[2,2])/sum(tbl)
+sens <- tbl[2,2]/(tbl[2,1] + tbl[2,2]) 
+spec <- tbl[1,1]/(tbl[1,1] + tbl[1,2]) 
+ppv <- tbl[2,2]/(tbl[1,2] + tbl[2,2]) 
+npv <- tbl[1,1]/(tbl[1,1] + tbl[2,1]) 
+dd$Accuracy.lasso <- c(crrcls,sens,spec,ppv,npv)
+
+
+```
+
+```{r}
+library(tree)
+set.seed(2023)
+t1 <- tree(fmla, heart)
+cv.heart <- cv.tree(t1,FUN = prune.misclass, K=10)
+plot(cv.heart$size,cv.heart$dev,type="b",cex=0.63) # best tree has 6 terminal nodes
+
+t1.pruned <- prune.tree(t1,best=6)
+
+plot(t1.pruned)
+text(t1.pruned,pretty=0) 
+# tree primarily uses serum_creatinine, ejection fraction, and age
+# serum_creatinine and ejection fraction are used the most
+summary(t1.pruned)
+
+# getting the in-sample testing characteristics
+probs <- predict(t1.pruned, heart)
+yhat <- ifelse(probs[,1] > 0.5, 0, 1)
+
+tbl <- table(heart$DEATH_EVENT, yhat)
+
+crrcls <- (tbl[1,1] + tbl[2,2])/sum(tbl)
+sens <- tbl[2,2]/(tbl[2,1] + tbl[2,2]) 
+spec <- tbl[1,1]/(tbl[1,1] + tbl[1,2]) 
+ppv <- tbl[2,2]/(tbl[1,2] + tbl[2,2]) 
+npv <- tbl[1,1]/(tbl[1,1] + tbl[2,1]) 
+dd$Accuracy.tree <- c(crrcls,sens,spec,ppv,npv)
+
+round(dd,3)
+dd <- round(dd,3)
+knitr::kable(dd,align = "c", caption = "Accuracy for 5 models", format = "simple")
+```
+
+```{r}
+best.fit<-glm(data=heart, 
+              DEATH_EVENT~age+creatinine_phosphokinase+ejection_fraction+high_blood_pressure+serum_creatinine+serum_sodium, 
+              family = binomial)
+summary(best.fit)
+
+Model <- c("Logistic", "Ridge", "LASSO", "K-NN", "Class Tree")
+Test_err <- c(0.2720, 0.2718, 0.2703, 0.4416, 0.3004)
+res <- data.frame(Model, Test_err)
+knitr::kable(res, align = "c", caption = "LOO Bootstrap Error for 5 models", format = "simple")
+```
+
+```{r, pval=FALSE}
+## LOO MSE
+
+model_list <- c('LR', 'Ridge', 'LASSO', 'KNN', 'ClassTree')
+
+# Limit to 50 iterations because of computational concerns
+B <- 50
+
+mse_collection <- rep(0,5)
+
+df <- heart
+
+# place to store the bootstrap samples
+boot_samples <- vector(mode = "list", length = B)
+
+# place to store the misclassifications for each index 
+#loo_errors <- rep(0, nrow(df))
+
+loo_errors <- matrix(0, nrow = 5, ncol = nrow(df))
+rownames(loo_errors) <- model_list
+
+# place to store the number of bootstrap samples that contains each index
+C_vec <- rep(0, nrow(df))
+
+gridd <- exp(seq(2,-6, -0.5))
+
+set.seed(1994)
+
+# carrying out the bootstrap
+for(i in 1:B) {
+  
+  # resampling the indices of the original dataframe
+  # do this without replacement
+  boot_idx <- sort(sample(nrow(df),nrow(df),replace=TRUE))
+  boot_samples[[i]] <- boot_idx
+}
+
+# calculating the errors per index
+for (i in 1:nrow(df)) {
+  for (j in 1:B) {
+    # if the boot sample does not contain the index, fit a knn model
+    if (!(i %in% boot_samples[[j]])) {
+      trn <- df[boot_samples[[j]],]
+      tst <- df[i,]
+      cls <- df$DEATH_EVENT[boot_samples[[j]]]
+      
+      # model 1
+      
+      lr_1 <-  glm(fmla,data = trn, family=binomial)
+      lr_mod <- step(lr_1, direction = 'backward', trace=0)
+      
+      # model 2
+      cv.rdg.fit <- cv.glmnet(as.matrix(trn[,xnams]), trn[,'DEATH_EVENT'], family = 'binomial', alpha = 0, lambda = gridd, nfolds = 10, type.measure = 'class')
+      
+      # model 3
+      cv.lso.fit <- cv.glmnet(as.matrix(trn[,xnams]), trn[,'DEATH_EVENT'], family = 'binomial', alpha = 1, lambda = gridd, nfolds = 10, type.measure = 'class')
+      
+      # model 4
+      knn_cv_res <- knn.cv(x=as.matrix(trn[,xnams]), y=trn$DEATH_EVENT, nfolds = 10, stratified = FALSE, k=1:10, type = 'C')
+      knn_mod <- class::knn(trn[,-ncol(trn)], tst[,-ncol(tst)], cls, k=which.max(knn_cv_res$crit))
+      
+      # model 5
+      t1_mod <- tree(fmla, trn)
+      cv.heart_mod <- cv.tree(t1_mod,FUN = prune.misclass)
+      classtree <- prune.tree(t1_mod,best=cv.heart_mod$size[which.min(cv.heart_mod$dev)])
+      
+      
+      # check for misclassification and update the loo_error
+      loo_errors[1,i] <- loo_errors[1,i] + as.numeric(ifelse(predict(lr_mod, newdata = tst, type = 'response') > 0.5,1,0) != df$DEATH_EVENT[i])
+      
+      loo_errors[2,i] <- loo_errors[2,i] + as.numeric(ifelse(predict(cv.rdg.fit, s=cv.rdg.fit$lambda.min, newx = as.matrix(tst[,xnams]), type = 'response') > 0.5,1,0) != df$DEATH_EVENT[i])
+      
+      loo_errors[3,i] <- loo_errors[3,i] + as.numeric(ifelse(predict(cv.lso.fit, s=cv.lso.fit$lambda.min, newx = as.matrix(tst[,xnams]), type = 'response') > 0.5,1,0) != df$DEATH_EVENT[i])
+      
+      loo_errors[4,i] <- loo_errors[4,i] + as.numeric(knn_mod != df$DEATH_EVENT[i])
+      
+      probs <- predict(classtree, tst)
+      yhat <- ifelse(probs[,1] > 0.5, 0, 1)
+      
+      loo_errors[5,i] <- loo_errors[5,i] + as.numeric(yhat != df$DEATH_EVENT[i])
+      
+      
+      # track that this bootstrap sample contained the index
+      C_vec[i] <- C_vec[i] + 1
+    }
+  }
+}
+
+# finding the average error rate among the results
+
+error_rates <- apply(loo_errors, 1, function(x){x/C_vec})
+
+unique(error_rates)[,1]
+dim(error_rates)
+View(error_rates)
+
+error_df <- apply(error_rates, 2, mean)
+View(as.data.frame(error_df))
+
+```
+
